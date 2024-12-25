@@ -1123,6 +1123,20 @@ public class DefaultCodegen implements CodegenConfig {
     }
 
     /**
+     * This method escapes text to be used in a single quoted string
+     * @param input the input string
+     * @return the escaped string
+     */
+    public String escapeTextInSingleQuotes(String input) {
+        if (input == null) {
+            return null;
+        }
+
+        return escapeText(input).replace("'", "\\'");
+    }
+
+
+    /**
      * Escape characters while allowing new lines
      *
      * @param input String to be escaped
@@ -3861,8 +3875,29 @@ public class DefaultCodegen implements CodegenConfig {
         }
 
         Schema original = null;
+        // process the dereference schema if it's a ref to allOf with a single item
+        // and certain field(s) (e.g. description, readyOnly, etc) is set
+        if (p.get$ref() != null) {
+            Schema derefSchema = ModelUtils.getReferencedSchema(openAPI, p);
+            if (ModelUtils.isAllOfWithSingleItem(derefSchema) && (
+                    derefSchema.getReadOnly() != null ||
+                            derefSchema.getWriteOnly() != null ||
+                            derefSchema.getDeprecated() != null ||
+                            derefSchema.getDescription() != null ||
+                            derefSchema.getMaxLength() != null ||
+                            derefSchema.getMinLength() != null ||
+                            derefSchema.getMinimum() != null ||
+                            derefSchema.getMaximum() != null ||
+                            derefSchema.getMaximum() != null ||
+                            derefSchema.getMinItems() != null ||
+                            derefSchema.getTitle() != null
+                    )) {
+                p = ModelUtils.getReferencedSchema(openAPI, p);
+            }
+        }
+
         // check if it's allOf (only 1 sub schema) with or without default/nullable/etc set in the top level
-        if (ModelUtils.isAllOf(p) && p.getAllOf().size() == 1) {
+        if (ModelUtils.isAllOfWithSingleItem(p)) {
             if (p.getAllOf().get(0) instanceof Schema) {
                 original = p;
                 p = (Schema) p.getAllOf().get(0);
@@ -4288,7 +4323,7 @@ public class DefaultCodegen implements CodegenConfig {
 
         if (baseItem != null) {
             // set both datatype and datetypeWithEnum as only the inner type is enum
-            property.datatypeWithEnum = property.datatypeWithEnum.replace(", " + baseItem.baseType, ", " + toEnumName(baseItem));
+            property.datatypeWithEnum = property.datatypeWithEnum.replace(baseItem.baseType + ">", toEnumName(baseItem) + ">");
 
             // naming the enum with respect to the language enum naming convention
             // e.g. remove [], {} from array/map of enum
@@ -4753,7 +4788,7 @@ public class DefaultCodegen implements CodegenConfig {
         op.hasRequiredParams = op.requiredParams.size() > 0;
 
         // check if the operation has only a single parameter
-       op.hasSingleParam = op.allParams.size() == 1;
+        op.hasSingleParam = op.allParams.size() == 1;
 
         // set Restful Flag
         op.isRestfulShow = op.isRestfulShow();
@@ -5680,8 +5715,6 @@ public class DefaultCodegen implements CodegenConfig {
         }
     }
 
-    private final Map<String, Integer> seenOperationIds = new HashMap<String, Integer>();
-
     /**
      * Add operation to group
      *
@@ -5702,18 +5735,13 @@ public class DefaultCodegen implements CodegenConfig {
         }
         // check for operationId uniqueness
         String uniqueName = co.operationId;
-        int counter = seenOperationIds.getOrDefault(uniqueName, 0);
-        while(seenOperationIds.containsKey(uniqueName)) {
-            uniqueName = co.operationId + "_" + counter;
-            counter++;
-        }
+        int counter = 0;
         for (CodegenOperation op : opList) {
             if (uniqueName.equals(op.operationId)) {
                 uniqueName = co.operationId + "_" + counter;
                 counter++;
             }
         }
-        seenOperationIds.put(co.operationId, counter);
         if (!co.operationId.equals(uniqueName)) {
             LOGGER.warn("generated unique operationId `{}`", uniqueName);
         }
@@ -6099,7 +6127,7 @@ public class DefaultCodegen implements CodegenConfig {
             return seenValues.get(value);
         }
 
-        Optional<Entry<String,String>> foundEntry = seenValues.entrySet().stream().filter(v -> v.getValue().toLowerCase(Locale.ROOT).equals(value.toLowerCase(Locale.ROOT))).findAny();
+        Optional<Entry<String, String>> foundEntry = seenValues.entrySet().stream().filter(v -> v.getValue().toLowerCase(Locale.ROOT).equals(value.toLowerCase(Locale.ROOT))).findAny();
         if (foundEntry.isPresent()) {
             int counter = 0;
             String uniqueValue = value + "_" + counter;
@@ -8160,7 +8188,7 @@ public class DefaultCodegen implements CodegenConfig {
             int exitValue = p.exitValue();
             if (exitValue != 0) {
                 try (InputStreamReader inputStreamReader = new InputStreamReader(p.getErrorStream(), StandardCharsets.UTF_8);
-                    BufferedReader br = new BufferedReader(inputStreamReader)) {
+                BufferedReader br = new BufferedReader(inputStreamReader)) {
                     StringBuilder sb = new StringBuilder();
                     String line;
                     while ((line = br.readLine()) != null) {
